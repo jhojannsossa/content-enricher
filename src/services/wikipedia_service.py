@@ -15,20 +15,42 @@ class WikipediaService:
 
     def search_article_title(self, topic: str) -> str:
         """
-        Busca un artículo en Wikipedia relacionado con el tema.
-        Devuelve el título del artículo encontrado.
+        Busca un artículo de Wikipedia relacionado con el tema.
         """
 
         if not topic or not topic.strip():
             raise ValueError("El tema no puede estar vacío.")
 
+        # Primera búsqueda: búsqueda normal
+        title = self._search_wikipedia(topic)
+
+        if title:
+            return title
+
+        # Segunda búsqueda: búsqueda aproximada
+        title = self._search_wikipedia(
+            f"{topic}~"
+        )
+
+        if title:
+            return title
+
+        raise ValueError(
+            f"No se encontró ningún artículo para: {topic}"
+        )
+
+    def _search_wikipedia(self, search_text: str) -> str | None:
+        """
+        Realiza una búsqueda en Wikipedia.
+        """
+
         params = {
             "action": "query",
             "list": "search",
-            "srsearch": topic,
+            "srsearch": search_text,
             "format": "json",
             "utf8": 1,
-            "srlimit": 1
+            "srlimit": 5
         }
 
         response = requests.get(
@@ -42,12 +64,16 @@ class WikipediaService:
 
         data = response.json()
 
-        results = data.get("query", {}).get("search", [])
+        results = data.get(
+            "query",
+            {}
+        ).get(
+            "search",
+            []
+        )
 
         if not results:
-            raise ValueError(
-                f"No se encontró ningún artículo para: {topic}"
-            )
+            return None
 
         return results[0]["title"]
 
@@ -88,8 +114,8 @@ class WikipediaService:
         html: str
     ) -> list[str]:
         """
-        Utiliza BeautifulSoup para extraer
-        los primeros cinco párrafos con contenido.
+        Extrae los primeros cinco párrafos
+        con contenido.
         """
 
         soup = BeautifulSoup(
@@ -123,15 +149,19 @@ class WikipediaService:
 
     def search(self, topic: str) -> Content:
         """
-        Ejecuta el proceso completo:
+        Realiza el proceso completo de búsqueda:
 
         1. Busca el artículo.
-        2. Obtiene su contenido.
+        2. Obtiene el HTML.
         3. Extrae los primeros cinco párrafos.
         4. Devuelve un objeto Content.
         """
 
+        print("\nBuscando artículo en Wikipedia...")
+
         title = self.search_article_title(topic)
+
+        print(f"Artículo encontrado: {title}")
 
         html = self.get_article_html(title)
 
