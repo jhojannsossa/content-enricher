@@ -1,55 +1,114 @@
 import requests
 from bs4 import BeautifulSoup
 
+from models.content import Content
+
 
 class WikipediaService:
-    """Servicio encargado de obtener información desde Wikipedia."""
+    """Servicio encargado de buscar y extraer información de Wikipedia."""
 
+    API_URL = "https://es.wikipedia.org/w/api.php"
     BASE_URL = "https://es.wikipedia.org/wiki/"
 
-    def search_article(self, topic: str) -> dict:
+    HEADERS = {
+        "User-Agent": "ContentEnricher/1.0"
+    }
+
+    def search_article_title(self, topic: str) -> str:
         """
-        Busca un artículo en Wikipedia y obtiene su título
-        y los primeros cinco párrafos.
+        Busca un artículo de Wikipedia relacionado con el tema.
+        Devuelve el título del artículo encontrado.
         """
 
-        topic_formatted = topic.strip().replace(" ", "_")
+        if not topic or not topic.strip():
+            raise ValueError("El tema no puede estar vacío.")
 
-        url = self.BASE_URL + topic_formatted
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": topic,
+            "format": "json",
+            "utf8": 1
+        }
 
-        response = requests.get(url, timeout=10)
+        response = requests.get(
+            self.API_URL,
+            params=params,
+            headers=self.HEADERS,
+            timeout=10
+        )
 
-        if response.status_code != 200:
-            raise Exception(
-                f"No se pudo encontrar el artículo: {topic}"
+        response.raise_for_status()
+
+        data = response.json()
+
+        results = data.get("query", {}).get("search", [])
+
+        if not results:
+            raise ValueError(
+                f"No se encontró ningún artículo para: {topic}"
             )
+
+        return results[0]["title"]
+
+    def get_article_content(self, title: str) -> Content:
+        """
+        Accede al artículo encontrado y extrae
+        su título y los primeros cinco párrafos.
+        """
+
+        url = self.BASE_URL + title.replace(" ", "_")
+
+        response = requests.get(
+            url,
+            headers=self.HEADERS,
+            timeout=10
+        )
+
+        response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        title = soup.find("h1")
+        article_title = soup.find("h1")
 
-        if title is None:
-            raise Exception("No se pudo encontrar el título del artículo.")
-
-        paragraphs = soup.find_all("p")
-
-        content = []
-
-        for paragraph in paragraphs:
-            text = paragraph.get_text(strip=True)
-
-            if text:
-                content.append(text)
-
-            if len(content) == 5:
-                break
-
-        if len(content) < 5:
-            raise Exception(
-                "El artículo no contiene cinco párrafos disponibles."
+        if article_title is None:
+            raise ValueError(
+                "No se pudo encontrar el título del artículo."
             )
 
-        return {
-            "title": title.get_text(strip=True),
-            "paragraphs": content
-        }
+        paragraphs = soup.select("div.mw-parser-output > p")
+
+        valid_paragraphs = []
+
+        for paragraph in paragraphs:
+            text = paragraph.get_text(
+                " ",
+                strip=True
+            )
+
+            if text:
+                valid_paragraphs.append(text)
+
+            if len(valid_paragraphs) == 5:
+                break
+
+        if not valid_paragraphs:
+            raise ValueError(
+                "No se encontraron párrafos en el artículo."
+            )
+
+        original_content = "\n\n".join(valid_paragraphs)
+
+        return Content(
+            title=article_title.get_text(strip=True),
+            original=original_content
+        )
+
+    def search(self, topic: str) -> Content:
+        """
+        Realiza el proceso completo de búsqueda en Wikipedia.
+        """
+
+        title = self.search_article_title(topic)
+
+        return self.get_article_content(title)
