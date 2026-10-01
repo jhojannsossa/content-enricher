@@ -1,0 +1,8 @@
+requests
+beautifulsoup4
+google-genai
+deep-translator
+python-dotenv
+reportlab
+pytest
+pytest-cov
