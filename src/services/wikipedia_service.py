@@ -8,15 +8,14 @@ class WikipediaService:
     """Servicio encargado de buscar y extraer información de Wikipedia."""
 
     API_URL = "https://es.wikipedia.org/w/api.php"
-    BASE_URL = "https://es.wikipedia.org/wiki/"
 
     HEADERS = {
-        "User-Agent": "ContentEnricher/1.0"
+        "User-Agent": "ContentEnricher/1.0 (Educational project)"
     }
 
     def search_article_title(self, topic: str) -> str:
         """
-        Busca un artículo de Wikipedia relacionado con el tema.
+        Busca un artículo en Wikipedia relacionado con el tema.
         Devuelve el título del artículo encontrado.
         """
 
@@ -28,7 +27,8 @@ class WikipediaService:
             "list": "search",
             "srsearch": topic,
             "format": "json",
-            "utf8": 1
+            "utf8": 1,
+            "srlimit": 1
         }
 
         response = requests.get(
@@ -51,36 +51,58 @@ class WikipediaService:
 
         return results[0]["title"]
 
-    def get_article_content(self, title: str) -> Content:
+    def get_article_html(self, title: str) -> str:
         """
-        Accede al artículo encontrado y extrae
-        su título y los primeros cinco párrafos.
+        Obtiene el contenido HTML de un artículo
+        utilizando la API de Wikipedia.
         """
 
-        url = self.BASE_URL + title.replace(" ", "_")
+        params = {
+            "action": "parse",
+            "page": title,
+            "prop": "text",
+            "format": "json",
+            "formatversion": "2"
+        }
 
         response = requests.get(
-            url,
+            self.API_URL,
+            params=params,
             headers=self.HEADERS,
             timeout=10
         )
 
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        data = response.json()
 
-        article_title = soup.find("h1")
-
-        if article_title is None:
+        if "parse" not in data:
             raise ValueError(
-                "No se pudo encontrar el título del artículo."
+                "Wikipedia no pudo devolver el contenido del artículo."
             )
 
-        paragraphs = soup.select("div.mw-parser-output > p")
+        return data["parse"]["text"]
+
+    def extract_five_paragraphs(
+        self,
+        html: str
+    ) -> list[str]:
+        """
+        Utiliza BeautifulSoup para extraer
+        los primeros cinco párrafos con contenido.
+        """
+
+        soup = BeautifulSoup(
+            html,
+            "html.parser"
+        )
+
+        paragraphs = soup.find_all("p")
 
         valid_paragraphs = []
 
         for paragraph in paragraphs:
+
             text = paragraph.get_text(
                 " ",
                 strip=True
@@ -97,18 +119,27 @@ class WikipediaService:
                 "No se encontraron párrafos en el artículo."
             )
 
-        original_content = "\n\n".join(valid_paragraphs)
-
-        return Content(
-            title=article_title.get_text(strip=True),
-            original=original_content
-        )
+        return valid_paragraphs
 
     def search(self, topic: str) -> Content:
         """
-        Realiza el proceso completo de búsqueda en Wikipedia.
+        Ejecuta el proceso completo:
+
+        1. Busca el artículo.
+        2. Obtiene su contenido.
+        3. Extrae los primeros cinco párrafos.
+        4. Devuelve un objeto Content.
         """
 
         title = self.search_article_title(topic)
 
-        return self.get_article_content(title)
+        html = self.get_article_html(title)
+
+        paragraphs = self.extract_five_paragraphs(html)
+
+        original_content = "\n\n".join(paragraphs)
+
+        return Content(
+            title=title,
+            original=original_content
+        )
