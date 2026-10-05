@@ -1,4 +1,5 @@
 import os
+import time
 
 from dotenv import load_dotenv
 from google import genai
@@ -21,8 +22,7 @@ class GeminiService:
 
     def enrich(self, title: str, content: str) -> str:
         """
-        Enriquece y organiza el contenido para convertirlo
-        en material de estudio.
+        Enriquece y organiza el contenido mediante Gemini.
         """
 
         prompt = f"""
@@ -51,14 +51,50 @@ Debes:
 Devuelve únicamente el documento de estudio.
 """
 
-        response = self.client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt
-        )
+        max_attempts = 3
 
-        if not response.text:
-            raise ValueError(
-                "Gemini no devolvió contenido."
-            )
+        for attempt in range(1, max_attempts + 1):
 
-        return response.text
+            try:
+                print(
+                    f"\nIntentando conectar con Gemini "
+                    f"(intento {attempt}/{max_attempts})..."
+                )
+
+                response = self.client.models.generate_content(
+                    model="gemini-3.8-flash",
+                    contents=prompt
+                )
+
+                if not response.text:
+                    raise ValueError(
+                        "Gemini no devolvió contenido."
+                    )
+
+                return response.text
+
+            except Exception as error:
+
+                error_message = str(error)
+
+                if "503" in error_message or "UNAVAILABLE" in error_message:
+
+                    if attempt < max_attempts:
+                        print(
+                            "\nGemini está temporalmente saturado."
+                        )
+                        print(
+                            "Esperando 5 segundos antes de volver a intentarlo..."
+                        )
+
+                        time.sleep(5)
+
+                    else:
+                        raise Exception(
+                            "Gemini no está disponible después de "
+                            f"{max_attempts} intentos. "
+                            "Inténtalo de nuevo más tarde."
+                        )
+
+                else:
+                    raise
