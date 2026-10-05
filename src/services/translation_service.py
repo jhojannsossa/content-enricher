@@ -1,96 +1,92 @@
-import os
-import time
-
-from dotenv import load_dotenv
-from google import genai
+import requests
 
 
 class TranslationService:
-    """Servicio encargado de traducir contenido mediante Gemini."""
+    """Servicio encargado de traducir contenido mediante MyMemory."""
 
     def __init__(self):
-        load_dotenv()
-
-        api_key = os.getenv("GEMINI_API_KEY")
-
-        if not api_key:
-            raise ValueError(
-                "No se encontró GEMINI_API_KEY en el archivo .env"
-            )
-
-        self.client = genai.Client(api_key=api_key)
+        self.url = "https://api.mymemory.translated.net/get"
 
     def translate(self, content: str, language: str) -> str:
         """
-        Traduce el contenido al idioma indicado utilizando Gemini.
+        Traduce un contenido utilizando la API de MyMemory.
         """
 
-        prompt = f"""
-Actúa como un traductor profesional.
+        source_language = "es"
 
-Traduce el siguiente documento al idioma cuyo código es: {language}
+        translated_parts = []
 
-INSTRUCCIONES:
+        # Dividimos el contenido en fragmentos
+        # para evitar superar el límite de MyMemory.
+        chunks = self._split_text(content, 400)
 
-1. Traduce todo el contenido.
-2. Mantén exactamente la estructura del documento.
-3. Mantén los títulos y subtítulos.
-4. Mantén las listas.
-5. No resumas.
-6. No añadas información nueva.
-7. No elimines información.
-8. Devuelve únicamente el texto traducido.
-9. Conserva el significado original.
+        for chunk in chunks:
 
-DOCUMENTO A TRADUCIR:
+            params = {
+                "q": chunk,
+                "langpair": f"{source_language}|{language}"
+            }
 
-{content}
-"""
+            response = requests.get(
+                self.url,
+                params=params,
+                timeout=30
+            )
 
-        max_attempts = 3
-
-        for attempt in range(1, max_attempts + 1):
-
-            try:
-                print(
-                    f"\nTraduciendo con Gemini "
-                    f"(intento {attempt}/{max_attempts})..."
+            if response.status_code != 200:
+                raise Exception(
+                    f"Error de MyMemory: "
+                    f"{response.status_code} - {response.text}"
                 )
 
-                response = self.client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=prompt
+            data = response.json()
+
+            response_status = data.get("responseStatus")
+
+            if response_status != 200:
+                raise Exception(
+                    f"MyMemory no pudo traducir el texto: "
+                    f"{data.get('responseDetails')}"
                 )
 
-                if not response.text:
-                    raise ValueError(
-                        "Gemini no devolvió contenido traducido."
-                    )
+            translated_text = data.get("responseData", {}).get(
+                "translatedText"
+            )
 
-                return response.text
+            if not translated_text:
+                raise ValueError(
+                    "MyMemory no devolvió contenido traducido."
+                )
 
-            except Exception as error:
+            translated_parts.append(translated_text)
 
-                error_message = str(error)
+        return "\n\n".join(translated_parts)
 
-                if "503" in error_message or "UNAVAILABLE" in error_message:
+    @staticmethod
+    def _split_text(text: str, max_length: int) -> list[str]:
+        """
+        Divide el texto en fragmentos pequeños.
+        Intenta respetar los saltos de párrafo.
+        """
 
-                    if attempt < max_attempts:
-                        print(
-                            "\nGemini está temporalmente saturado."
-                        )
-                        print(
-                            "Esperando 5 segundos antes de volver a intentarlo..."
-                        )
+        paragraphs = text.split("\n")
 
-                        time.sleep(5)
+        chunks = []
+        current_chunk = ""
 
-                    else:
-                        raise Exception(
-                            "Gemini no está disponible para la traducción "
-                            f"después de {max_attempts} intentos. "
-                            "Inténtalo de nuevo más tarde."
-                        )
+        for paragraph in paragraphs:
 
-                else:
-                    raise
+            if len(current_chunk) + len(paragraph) + 1 <= max_length:
+                current_chunk += paragraph + "\n"
+
+            else:
+
+                if current_chunk.strip():
+                    chunks.append(current_chunk.strip())
+
+                current_chunk = paragraph + "\n"
+
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+
+        return chunks
